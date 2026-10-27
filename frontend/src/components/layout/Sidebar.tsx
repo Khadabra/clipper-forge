@@ -45,7 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: 'Media & Editing',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'projects', label: 'Projects / Import', icon: Film, isPlanned: true },
+        { id: 'projects', label: 'Projects / Import', icon: Film },       // M2: Active
         { id: 'clip-finder', label: 'Clip Finder', icon: Scissors, isPlanned: true },
         { id: 'editor', label: 'Video Editor', icon: Sliders, isPlanned: true },
         { id: 'captions', label: 'Caption Studio', icon: Type, isPlanned: true },
@@ -77,7 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className="sidebar">
       <div className="sidebar-header">
         <div className="brand-icon">
-          <Film size={16} color="#fff" />
+          <Film size={14} color="var(--bg-app)" />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span className="brand-name">ClipForge Studio</span>

@@ -4,22 +4,23 @@ import {
   HardDrive,
   Cpu,
   Terminal,
-  FolderPlus,
-  ArrowRight,
   ShieldAlert,
   Server,
   Layers,
+  CheckCheck,
 } from 'lucide-react';
 import type { SystemCheckResponse } from '../../types/system';
 
 interface DashboardPageProps {
   systemData: SystemCheckResponse | null;
   loading: boolean;
+  onNavigateToProjects?: () => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   systemData,
   loading,
+  onNavigateToProjects,
 }) => {
   const ffmpeg = systemData?.ffmpeg;
   const ffprobe = systemData?.ffprobe;
@@ -27,72 +28,40 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const disk = systemData?.disk_space;
 
   const usedPercent = disk ? Math.round((disk.used_gb / disk.total_gb) * 100) : 0;
+  const diskWarn = usedPercent > 85;
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-      {/* Hero Welcome Banner */}
-      <div
-        style={{
-          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(168, 85, 247, 0.05))',
-          border: '1px solid var(--border-strong)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '24px 28px',
-          marginBottom: 24,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          backdropFilter: 'blur(8px)',
-        }}
-      >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <span
-              style={{
-                background: 'var(--accent-primary)',
-                color: '#fff',
-                fontSize: 11,
-                fontWeight: 700,
-                padding: '2px 8px',
-                borderRadius: 'var(--radius-pill)',
-                textTransform: 'uppercase',
-              }}
-            >
-              M1 — Foundation
-            </span>
-            <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-              Local-first Architecture Verified
-            </span>
-          </div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
-            ClipForge Studio Workstation
-          </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 650 }}>
-            Platform produksi konten dan clipping video cerdas dengan kendali lokal penuh, pemrosesan aman tanpa API berbayar wajib, dan alur kerja terstruktur dari ide hingga distribusi multi-platform.
-          </p>
-        </div>
-
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-            Environment
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-            localhost:5173 ↔ :8000
-          </div>
-        </div>
+    <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+      {/* Page heading */}
+      <div style={{ marginBottom: 24 }}>
+        <h1
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            letterSpacing: '-0.3px',
+            marginBottom: 4,
+          }}
+        >
+          System Overview
+        </h1>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          Verifikasi dependensi backend, kapasitas penyimpanan, dan status milestone.
+        </p>
       </div>
 
       <div className="dashboard-grid">
-        {/* Left Column: System Diagnostics Card */}
+        {/* Left Column: System Diagnostics */}
         <div className="col-8">
           <div className="card">
             <div className="card-header">
               <div>
                 <h2 className="card-title">
-                  <Server size={17} color="#818cf8" />
-                  System Diagnostics & Media Engine
+                  <Server size={15} color="var(--text-muted)" />
+                  System Diagnostics
                 </h2>
                 <p className="card-description">
-                  Status verifikasi dependensi backend, pemrosesan video, dan kapasitas penyimpanan lokal.
+                  Dependensi backend dan status pemrosesan media.
                 </p>
               </div>
               <span
@@ -100,32 +69,39 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   systemData?.status === 'ready' ? 'ready' : 'warning'
                 }`}
               >
-                {systemData?.status === 'ready' ? 'All Systems Operational' : 'Action Required'}
+                {systemData?.status === 'ready' ? 'Operational' : 'Action Required'}
               </span>
             </div>
 
             {loading ? (
-              <div style={{ padding: '30px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Memeriksa kondisi lingkungan sistem...
+              <div
+                style={{
+                  padding: '28px 0',
+                  textAlign: 'center',
+                  color: 'var(--text-muted)',
+                  fontSize: 12,
+                }}
+              >
+                Memeriksa kondisi sistem...
               </div>
             ) : (
               <div>
                 {/* FFmpeg Row */}
                 <div className="metric-row">
                   <div className="metric-label">
-                    <Terminal size={15} color={ffmpeg?.available ? '#34d399' : '#f59e0b'} />
+                    <Terminal size={13} color={ffmpeg?.available ? 'var(--status-ok)' : 'var(--status-warn)'} />
                     <span>FFmpeg Media Transcoder</span>
                   </div>
                   <div className="metric-value" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {ffmpeg?.available ? (
                       <>
-                        <span style={{ color: '#34d399' }}>Available</span>
-                        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                          ({ffmpeg.version?.split(' ')[2] || 'Installed'})
+                        <span style={{ color: 'var(--status-ok)' }}>Available</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                          {ffmpeg.version?.split(' ')[2] || 'Installed'}
                         </span>
                       </>
                     ) : (
-                      <span style={{ color: '#fbbf24' }}>Not Found in PATH</span>
+                      <span style={{ color: 'var(--status-warn)' }}>Not Found in PATH</span>
                     )}
                   </div>
                 </div>
@@ -133,14 +109,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 {/* ffprobe Row */}
                 <div className="metric-row">
                   <div className="metric-label">
-                    <Terminal size={15} color={ffprobe?.available ? '#34d399' : '#f59e0b'} />
+                    <Terminal size={13} color={ffprobe?.available ? 'var(--status-ok)' : 'var(--status-warn)'} />
                     <span>ffprobe Media Inspector</span>
                   </div>
                   <div className="metric-value">
                     {ffprobe?.available ? (
-                      <span style={{ color: '#34d399' }}>Available</span>
+                      <span style={{ color: 'var(--status-ok)' }}>Available</span>
                     ) : (
-                      <span style={{ color: '#fbbf24' }}>Not Found</span>
+                      <span style={{ color: 'var(--status-warn)' }}>Not Found</span>
                     )}
                   </div>
                 </div>
@@ -148,29 +124,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 {/* Python Runtime Row */}
                 <div className="metric-row">
                   <div className="metric-label">
-                    <Cpu size={15} color="#818cf8" />
-                    <span>Python Runtime (Backend .venv)</span>
+                    <Cpu size={13} color="var(--text-muted)" />
+                    <span>Python Runtime (.venv)</span>
                   </div>
                   <div className="metric-value">
-                    v{python?.version || '3.12'} ({python?.system || 'Windows'} {python?.release})
+                    v{python?.version || '3.12'} ({python?.system || 'Windows'})
                   </div>
                 </div>
 
-                {/* Storage Metrics Row */}
+                {/* Storage Row */}
                 {disk && (
-                  <div style={{ marginTop: 14 }}>
+                  <div style={{ marginTop: 12 }}>
                     <div className="metric-row" style={{ borderBottom: 'none', paddingBottom: 4 }}>
                       <div className="metric-label">
-                        <HardDrive size={15} color="#38bdf8" />
-                        <span>Kapasitas Penyimpanan Lokal (Workspace)</span>
+                        <HardDrive size={13} color="var(--text-muted)" />
+                        <span>Penyimpanan Lokal</span>
                       </div>
                       <div className="metric-value">
-                        {disk.free_gb} GB bebas dari {disk.total_gb} GB
+                        {disk.free_gb} GB bebas / {disk.total_gb} GB
                       </div>
                     </div>
                     <div className="progress-bar-bg">
                       <div
-                        className="progress-bar-fill"
+                        className={`progress-bar-fill${diskWarn ? ' warn' : ''}`}
                         style={{ width: `${Math.min(100, usedPercent)}%` }}
                       />
                     </div>
@@ -178,27 +154,25 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       style={{
                         display: 'flex',
                         justifyContent: 'space-between',
-                        fontSize: 11,
+                        fontSize: 10,
                         color: 'var(--text-muted)',
                         marginTop: 4,
                       }}
                     >
                       <span>Terpakai: {disk.used_gb} GB ({usedPercent}%)</span>
-                      <span>Sisa Ruang: {disk.free_percent}%</span>
+                      <span>Sisa: {disk.free_percent}%</span>
                     </div>
                   </div>
                 )}
 
-                {/* Actionable Guidance Box if FFmpeg is Missing */}
+                {/* Guidance box if FFmpeg is missing */}
                 {systemData?.guidance && (
                   <div className="guidance-box">
-                    <ShieldAlert size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <ShieldAlert size={15} style={{ flexShrink: 0, marginTop: 1 }} />
                     <div>
-                      <strong>Petunjuk Pengaturan Windows:</strong>
-                      <div style={{ marginTop: 4 }}>{systemData.guidance}</div>
-                      <div style={{ marginTop: 6 }}>
-                        Buka terminal PowerShell pengguna dan jalankan perintah:
-                        <br />
+                      <strong>Cara menginstall FFmpeg di Windows:</strong>
+                      <div style={{ marginTop: 4 }}>
+                        Buka PowerShell dan jalankan:{' '}
                         <code>winget install Gyan.FFmpeg</code>
                       </div>
                     </div>
@@ -209,84 +183,105 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Quick Actions & Milestone Status */}
+        {/* Right Column: Roadmap status */}
         <div className="col-4">
-          {/* New Project Placeholder */}
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header" style={{ marginBottom: 12 }}>
               <h3 className="card-title">
-                <FolderPlus size={16} color="#6366f1" />
-                Workflow Video Baru
+                <Layers size={14} color="var(--text-muted)" />
+                Roadmap
               </h3>
             </div>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Di Milestone 2 (Import & Jobs), Anda akan dapat mengunggah video lokal (MP4/MKV/MOV), mengekstrak metadata ffprobe, dan memproses clipping secara offline.
-            </p>
-            <button
-              disabled
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--bg-surface-elevated)',
-                border: '1px solid var(--border-strong)',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'not-allowed',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <span>Import Video (Tersedia di M2)</span>
-              <ArrowRight size={14} />
-            </button>
+            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                { label: 'M1: Foundation & Shell', done: true, active: false },
+                { label: 'M2: Ingestion & Jobs (ffprobe)', done: true, active: true },
+                { label: 'M3: Transkripsi (faster-whisper)', done: false, active: false },
+                { label: 'M4: Clip Finder & Rubrik Scoring', done: false, active: false },
+                { label: 'M7: AI Creative Studio', done: false, active: false },
+              ].map((item) => (
+                <li
+                  key={item.label}
+                  style={{
+                    fontSize: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    opacity: !item.done && !item.active ? 0.45 : 1,
+                  }}
+                >
+                  {item.done ? (
+                    <CheckCircle2 size={13} color="var(--status-ok)" style={{ flexShrink: 0 }} />
+                  ) : (
+                    <span
+                      style={{
+                        width: 13,
+                        height: 13,
+                        borderRadius: '50%',
+                        border: `1.5px solid ${item.active ? 'var(--text-primary)' : 'var(--border-medium)'}`,
+                        display: 'inline-block',
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
+                  <span
+                    style={{
+                      color: item.done || item.active ? 'var(--text-primary)' : 'var(--text-muted)',
+                      fontWeight: item.active ? 600 : 400,
+                    }}
+                  >
+                    {item.label}
+                  </span>
+                  {item.done && (
+                    <span
+                      style={{
+                        marginLeft: 'auto',
+                        fontSize: 9,
+                        color: 'var(--status-ok)',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Selesai
+                    </span>
+                  )}
+                  {item.active && !item.done && (
+                    <span
+                      style={{
+                        marginLeft: 'auto',
+                        fontSize: 9,
+                        color: 'var(--text-muted)',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Aktif
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
 
-          {/* Roadmap Highlights */}
+          {/* Quick action: go to Projects */}
           <div className="card">
             <div className="card-header" style={{ marginBottom: 10 }}>
               <h3 className="card-title">
-                <Layers size={16} color="#38bdf8" />
-                Tahapan Roadmap
+                <CheckCheck size={14} color="var(--status-ok)" />
+                M2 Aktif
               </h3>
             </div>
-            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <li style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CheckCircle2 size={14} color="#34d399" />
-                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                  M1: Foundation & Shell
-                </span>
-                <span style={{ fontSize: 10, color: '#34d399', marginLeft: 'auto' }}>SELESAI</span>
-              </li>
-              <li style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--accent-primary)', display: 'inline-block' }} />
-                <span style={{ color: 'var(--text-secondary)' }}>
-                  M2: Ingestion & Jobs (ffprobe)
-                </span>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>Berikutnya</span>
-              </li>
-              <li style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.6 }}>
-                <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border-strong)', display: 'inline-block' }} />
-                <span style={{ color: 'var(--text-muted)' }}>
-                  M3: Transkripsi (faster-whisper)
-                </span>
-              </li>
-              <li style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.6 }}>
-                <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border-strong)', display: 'inline-block' }} />
-                <span style={{ color: 'var(--text-muted)' }}>
-                  M4: Clip Finder & Rubrik Scoring
-                </span>
-              </li>
-              <li style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.6 }}>
-                <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border-strong)', display: 'inline-block' }} />
-                <span style={{ color: 'var(--text-muted)' }}>
-                  M7: AI Creative Studio & Threads Writer
-                </span>
-              </li>
-            </ul>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
+              Upload video, ekstrak metadata otomatis via ffprobe, dan kelola proyek yang tersimpan.
+            </p>
+            <button
+              id="btn-go-to-upload"
+              className="btn btn-primary btn-full"
+              onClick={onNavigateToProjects}
+              type="button"
+            >
+              Buka Upload Video
+            </button>
           </div>
         </div>
       </div>

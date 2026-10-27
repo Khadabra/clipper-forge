@@ -17,6 +17,8 @@ yarn-error.log*
 
 # Environment & Secrets
 .env
+backend/.env
+*.env
 .env.local
 .env.*.local
 
@@ -28,6 +30,8 @@ storage/exports/*
 !storage/temp/.gitkeep
 !storage/exports/.gitkeep
 !storage/music-library/.gitkeep
+backend/storage/
+*.db
 
 # IDE & OS
 .vscode/

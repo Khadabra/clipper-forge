@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback } from 'react';
 import { Topbar } from './components/layout/Topbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { DashboardPage } from './features/dashboard/DashboardPage';
+import { ProjectsPage } from './features/projects/ProjectsPage';
 import { fetchHealth, fetchSystemCheck } from './services/api';
 import type { SystemCheckResponse } from './types/system';
 import { Construction, ArrowLeft } from 'lucide-react';
 
+type Route = 'dashboard' | 'projects' | string;
+
 export function App() {
-  const [currentRoute, setCurrentRoute] = useState<string>('dashboard');
+  const [currentRoute, setCurrentRoute] = useState<Route>('dashboard');
   const [systemData, setSystemData] = useState<SystemCheckResponse | null>(null);
   const [backendConnected, setBackendConnected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
@@ -15,11 +18,8 @@ export function App() {
   const loadSystemDiagnostics = useCallback(async () => {
     setLoading(true);
     try {
-      // First verify health
       await fetchHealth();
       setBackendConnected(true);
-
-      // Fetch detailed diagnostics
       const data = await fetchSystemCheck();
       setSystemData(data);
     } catch (err) {
@@ -37,7 +37,6 @@ export function App() {
 
   return (
     <div className="app-container">
-      {/* Sidebar Navigation */}
       <Sidebar
         currentRoute={currentRoute}
         onNavigate={(route) => setCurrentRoute(route)}
@@ -50,7 +49,6 @@ export function App() {
         }
       />
 
-      {/* Main Content Area */}
       <div className="main-wrapper">
         <Topbar
           systemData={systemData}
@@ -64,15 +62,18 @@ export function App() {
             <DashboardPage
               systemData={systemData}
               loading={loading}
+              onNavigateToProjects={() => setCurrentRoute('projects')}
             />
+          ) : currentRoute === 'projects' ? (
+            <ProjectsPage />
           ) : (
-            /* Planned Feature Placeholder View */
+            /* Planned feature placeholder */
             <div
               style={{
-                maxWidth: 750,
-                margin: '60px auto',
+                maxWidth: 680,
+                margin: '48px auto',
                 textAlign: 'center',
-                padding: '40px 30px',
+                padding: '36px 28px',
                 background: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-lg)',
@@ -80,45 +81,40 @@ export function App() {
             >
               <div
                 style={{
-                  width: 52,
-                  height: 52,
+                  width: 44,
+                  height: 44,
                   borderRadius: 'var(--radius-md)',
-                  background: 'rgba(99, 102, 241, 0.1)',
+                  background: 'var(--bg-surface-elevated)',
+                  border: '1px solid var(--border-medium)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  margin: '0 auto 20px auto',
-                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  margin: '0 auto 18px auto',
+                  color: 'var(--text-muted)',
                 }}
               >
-                <Construction size={26} color="#818cf8" />
+                <Construction size={22} />
               </div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
-                Modul Dijadwalkan (Milestone Berikutnya)
+              <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>
+                Modul Dijadwalkan
               </h2>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>
-                Sesuai prinsip pengembangan terstruktur ClipForge Studio, fitur{' '}
-                <strong style={{ color: 'var(--text-primary)' }}>{currentRoute}</strong> akan diimplementasikan
-                setelah fondasi inti (M1) diverifikasi dan berjalan stabil. Tidak ada mockup palsu yang disamarkan
-                sebagai fitur operasional.
+              <p
+                style={{
+                  color: 'var(--text-secondary)',
+                  fontSize: 13,
+                  marginBottom: 22,
+                  lineHeight: 1.6,
+                }}
+              >
+                Fitur <strong style={{ color: 'var(--text-primary)' }}>{currentRoute}</strong>{' '}
+                akan diimplementasikan pada milestone berikutnya.
               </p>
               <button
                 onClick={() => setCurrentRoute('dashboard')}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '9px 18px',
-                  background: 'var(--accent-primary)',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
+                className="btn btn-ghost"
+                style={{ display: 'inline-flex' }}
               >
-                <ArrowLeft size={14} />
+                <ArrowLeft size={13} />
                 Kembali ke Dashboard
               </button>
             </div>
