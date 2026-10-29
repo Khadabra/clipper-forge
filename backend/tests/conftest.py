@@ -18,6 +18,7 @@ from app.models import project as _proj_model  # noqa: F401
 from app.models import job as _job_model  # noqa: F401
 from app.models import transcript as _trans_model  # noqa: F401
 from app.models import clip as _clip_model  # noqa: F401
+from app.models import token_usage as _token_model  # noqa: F401
 
 
 @pytest.fixture(scope="function")
@@ -67,4 +68,15 @@ def client(db_engine):
 
     app.dependency_overrides.clear()
     job_queue.session_factory = orig_factory
+
+
+@pytest.fixture(scope="function")
+def db_session(db_engine):
+    """Provides a dedicated SQLAlchemy session bound to the test db_engine."""
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    session = Session()
+    try:
+        yield session
+    finally:
+        session.close()
 

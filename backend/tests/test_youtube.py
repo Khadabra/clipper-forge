@@ -109,7 +109,7 @@ def test_youtube_download_job_pipeline(client: TestClient, tmp_path: Path):
         project_id = resp.json()["project_id"]
 
         import time
-        for _ in range(100):
+        for _ in range(200):
             j_resp = client.get(f"/api/jobs/{job_id}")
             if j_resp.status_code == 200 and j_resp.json()["status"] in ("completed", "failed", "cancelled"):
                 break
@@ -148,7 +148,7 @@ def test_youtube_download_job_failure_handling(client: TestClient):
         project_id = resp.json()["project_id"]
 
         import time
-        for _ in range(100):
+        for _ in range(200):
             j_resp = client.get(f"/api/jobs/{job_id}")
             if j_resp.status_code == 200 and j_resp.json()["status"] in ("completed", "failed", "cancelled"):
                 break

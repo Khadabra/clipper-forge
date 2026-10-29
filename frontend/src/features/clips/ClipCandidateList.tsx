@@ -17,16 +17,19 @@ import {
   Filter,
   Flame,
   RefreshCw,
+  Scissors,
 } from 'lucide-react';
 import type { ClipCandidate, ClipCandidateUpdate } from '../../types/clip';
 import {
   fetchClips,
   triggerFindClips,
+  createManualClip,
   updateClip,
   deleteClip,
 } from '../../services/clipsApi';
 import { subscribeJobEvents } from '../../services/jobsApi';
 import { ClipCard } from './ClipCard';
+import { ClipEditorStudio } from './ClipEditorStudio';
 
 interface Props {
   projectId: string;
@@ -50,6 +53,8 @@ export const ClipCandidateList: React.FC<Props> = ({
   const [jobStage, setJobStage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [filterApprovedOnly, setFilterApprovedOnly] = useState(false);
+  const [isCreatingManual, setIsCreatingManual] = useState(false);
+  const [activeStudioClip, setActiveStudioClip] = useState<ClipCandidate | null>(null);
 
   // Active clip preview bounds
   const [previewClipId, setPreviewClipId] = useState<string | null>(null);
@@ -68,6 +73,26 @@ export const ClipCandidateList: React.FC<Props> = ({
       setIsLoading(false);
     }
   }, [projectId]);
+
+  const handleCreateManualClip = async () => {
+    setIsCreatingManual(true);
+    setError(null);
+    try {
+      const start = Math.max(0.0, Number((currentTime || 0.0).toFixed(2)));
+      const newClip = await createManualClip(projectId, {
+        title: `Klip Manual ${clips.length + 1}`,
+        start_time: start,
+        end_time: start + 30.0,
+      });
+      await loadClips();
+      setActiveStudioClip(newClip);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal membuat klip manual.';
+      setError(msg);
+    } finally {
+      setIsCreatingManual(false);
+    }
+  };
 
   useEffect(() => {
     loadClips();
@@ -229,6 +254,23 @@ export const ClipCandidateList: React.FC<Props> = ({
           </button>
 
           <button
+            type="button"
+            id="btn-create-manual-clip"
+            className="btn btn-secondary"
+            style={{ fontSize: 12, padding: '6px 12px', height: '32px', gap: 6 }}
+            onClick={handleCreateManualClip}
+            disabled={isCreatingManual || isFindingClips}
+            title="Potong klip manual pada durasi saat ini ala CapCut"
+          >
+            {isCreatingManual ? (
+              <Loader2 size={13} className="spin" />
+            ) : (
+              <Scissors size={13} />
+            )}
+            <span>+ Klip Manual</span>
+          </button>
+
+          <button
             id="btn-find-clips-ai"
             type="button"
             className="btn btn-primary"
@@ -382,10 +424,47 @@ export const ClipCandidateList: React.FC<Props> = ({
             Belum Ada Klip yang Ditemukan
           </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 360, margin: 0 }}>
-            Klik tombol "Cari Momen Viral (AI)" di atas untuk memindai transkrip video Anda dan menghasilkan 3–6 klip shorts berpotensi viral tinggi.
+            Pindai otomatis momen viral menggunakan AI atau buat klip baru secara manual untuk langsung diedit ala CapCut.
           </p>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+            <button
+              onClick={handleFindClips}
+              disabled={isFindingClips}
+              className="btn btn-primary btn-sm"
+            >
+              <Sparkles size={13} />
+              Cari Momen Viral (AI)
+            </button>
+            <button
+              onClick={handleCreateManualClip}
+              disabled={isCreatingManual}
+              className="btn btn-secondary btn-sm"
+              title="Buat klip baru dan edit secara manual (CapCut style)"
+            >
+              {isCreatingManual ? (
+                <Loader2 size={13} className="spin" />
+              ) : (
+                <Scissors size={13} />
+              )}
+              + Buat Klip Manual
+            </button>
+          </div>
         </div>
       ) : null}
+
+      {/* Standalone Interactive Studio Editor Overlay */}
+      {activeStudioClip && (
+        <ClipEditorStudio
+          clip={activeStudioClip}
+          isOpen={Boolean(activeStudioClip)}
+          onClose={() => {
+            setActiveStudioClip(null);
+            loadClips();
+          }}
+          onClipUpdated={() => loadClips()}
+        />
+      )}
     </div>
   );
 };

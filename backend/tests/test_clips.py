@@ -404,3 +404,282 @@ def test_find_clips_pipeline_and_crud(client: TestClient, project_with_transcrip
     # 8. DELETE again should return 404
     del_again = client.delete(f"/api/clips/{first_clip_id}")
     assert del_again.status_code == 404
+
+
+def test_intro_hook_banner_and_cover_grabber(client: TestClient, project_with_transcripts: str, db_engine):
+    """Test intro_hook_banner toggling and POST/GET cover image flow."""
+    proj_id = project_with_transcripts
+
+    from sqlalchemy.orm import sessionmaker
+    from app.models.clip import ClipCandidate
+
+    TestingSession = sessionmaker(bind=db_engine)
+    with TestingSession() as db:
+        c = ClipCandidate(
+            project_id=proj_id,
+            title="Rahasia Monetisasi Startup",
+            hook="JANGAN TERLALU JATUH CINTA PADA PRODUK!",
+            rationale="High virality hook.",
+            start_time=10.0,
+            end_time=40.0,
+            virality_score=92,
+            category="business",
+            intro_hook_banner=True,
+        )
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        clip_id = c.id
+
+    assert c.intro_hook_banner is True
+
+    # 1. Update intro_hook_banner via PATCH
+    patch_resp = client.patch(
+        f"/api/clips/{clip_id}",
+        json={"intro_hook_banner": False},
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["intro_hook_banner"] is False
+
+    # 2. GET cover before generating -> 404
+    cov_resp_404 = client.get(f"/api/clips/{clip_id}/cover")
+    assert cov_resp_404.status_code == 404
+
+    # 3. POST generate-cover with mocked ffmpeg
+    def fake_ffmpeg_run(cmd, *args, **kwargs):
+        out_file = Path(cmd[-1])
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00dummy_cover_bytes")
+        res = MagicMock()
+        res.returncode = 0
+        res.stdout = ""
+        res.stderr = ""
+        return res
+
+    with patch("app.api.routes.clips.subprocess.run", side_effect=fake_ffmpeg_run):
+        gen_resp = client.post(f"/api/clips/{clip_id}/generate-cover")
+        assert gen_resp.status_code == 200
+        assert gen_resp.headers["content-type"].startswith("image/jpeg")
+        assert gen_resp.content.startswith(b"\xff\xd8\xff\xe0")
+
+    # 4. GET cover after generation -> 200
+    cov_resp_200 = client.get(f"/api/clips/{clip_id}/cover")
+    assert cov_resp_200.status_code == 200
+    assert cov_resp_200.headers["content-type"].startswith("image/jpeg")
+    assert cov_resp_200.content.startswith(b"\xff\xd8\xff\xe0")
+
+
+def test_generate_and_get_social_copy(client: TestClient, project_with_transcripts: str, db_engine):
+    proj_id = project_with_transcripts
+
+    from sqlalchemy.orm import sessionmaker
+    from app.models.clip import ClipCandidate
+
+    TestingSession = sessionmaker(bind=db_engine)
+    with TestingSession() as db:
+        c = ClipCandidate(
+            project_id=proj_id,
+            title="Trik Rahasia Sukses Usaha Startup",
+            hook="Jangan pernah buat produk sebelum punya pembeli!",
+            rationale="Momen actionable bernilai tinggi.",
+            start_time=10.0,
+            end_time=35.0,
+            category="Insight",
+            virality_score=92,
+        )
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        clip_id = c.id
+
+    # 1. POST generate-social-copy with 'all' platforms (algorithmic fallback)
+    with patch("app.services.social_copywriter.settings.GEMINI_API_KEY", None):
+        resp = client.post(
+            f"/api/clips/{clip_id}/generate-social-copy",
+            json={"platform": "all", "custom_topic": "entrepreneur"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["clip_id"] == clip_id
+        assert "tiktok" in data["copies"]
+        assert "shorts" in data["copies"]
+        assert "reels" in data["copies"]
+
+        tt = data["copies"]["tiktok"]
+        assert "hook" in tt and len(tt["hook"]) > 0
+        assert "caption" in tt and len(tt["caption"]) <= 150
+        assert len(tt["hashtags"]) == 4
+        assert "#fyp" in tt["hashtags"]
+        assert "full_formatted_text" in tt
+        assert tt["cta"] in tt["full_formatted_text"]
+
+        sh = data["copies"]["shorts"]
+        assert len(sh["title"]) <= 60
+        assert "#Shorts" in sh["hashtags"]
+
+        reels = data["copies"]["reels"]
+        assert len(reels["hashtags"]) == 5
+        assert "Follow" in reels["cta"]
+
+        # 2. GET social-copy returns cached copy
+        get_resp = client.get(f"/api/clips/{clip_id}/social-copy")
+        assert get_resp.status_code == 200
+        get_data = get_resp.json()
+        assert get_data["copies"]["tiktok"]["caption"] == tt["caption"]
+
+        # 3. Regenerate single platform (tiktok only)
+        single_resp = client.post(
+            f"/api/clips/{clip_id}/generate-social-copy",
+            json={"platform": "tiktok"},
+        )
+        assert single_resp.status_code == 200
+        assert "tiktok" in single_resp.json()["copies"]
+
+
+def test_generate_social_copy_gemini_mock(client: TestClient, project_with_transcripts: str, db_engine):
+    from sqlalchemy.orm import sessionmaker
+    from app.models.clip import ClipCandidate
+
+    TestingSession = sessionmaker(bind=db_engine)
+    with TestingSession() as db:
+        c = ClipCandidate(
+            project_id=project_with_transcripts,
+            title="Cara Cepat Monetisasi Podcast",
+            hook="Dapat sponsor pertama cuma modal 1000 views!",
+            rationale="Tips menghasilkan uang dari konten.",
+            start_time=5.0,
+            end_time=30.0,
+        )
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        clip_id = c.id
+
+    gemini_output = {
+        "tiktok": {
+            "title": "Monetisasi Podcast Kilat",
+            "hook": "Banyak yang gak tahu rahasia sponsor ini...",
+            "caption": "Modal 1000 views udah bisa dapet cuan? Tonton sampai habis!",
+            "hashtags": ["#podcast", "#cuan", "#tipsbisnis", "#fyp"],
+            "cta": "Kalian udah pernah coba cara ini belum? Komen di bawah!",
+        },
+        "shorts": {
+            "title": "Trik Dapat Sponsor Podcast Pertama",
+            "hook": "Cara monetize podcast modal kecil",
+            "caption": "Panduan langkah demi langkah mendapatkan sponsor untuk podcaster pemula.",
+            "hashtags": ["#Shorts", "#Podcasting", "#TipsKreator"],
+            "cta": "Subscribe untuk tips konten kreator lainnya!",
+        },
+        "reels": {
+            "title": "Strategi Monetisasi Podcast",
+            "hook": "✨ Rahasia cuan dari podcast pemula",
+            "caption": "Banyak kreator salah fokus di jumlah subscriber...\n\nPadahal engagement adalah kunci utama brand mau bayar kamu.\n\nSave reels ini biar gak lupa!",
+            "hashtags": ["#reelsindonesia", "#kontenkreator", "#bisnisdigital", "#podcastindonesia", "#monetisasi"],
+            "cta": "Follow akun ini untuk panduan kreator harian!",
+        },
+    }
+
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = json.dumps(gemini_output)
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.social_copywriter.settings.GEMINI_API_KEY", "mock-gemini-key"):
+        with patch("google.genai.Client", return_value=mock_client):
+            resp = client.post(
+                f"/api/clips/{clip_id}/generate-social-copy",
+                json={"platform": "all"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["copies"]["tiktok"]["caption"] == gemini_output["tiktok"]["caption"]
+            assert data["copies"]["shorts"]["title"] == gemini_output["shorts"]["title"]
+
+
+def test_download_export_kit_zip(client: TestClient, project_with_transcripts: str, tmp_path: Path, db_engine):
+    from sqlalchemy.orm import sessionmaker
+    from app.models.clip import ClipCandidate
+    import zipfile
+    import io
+
+    TestingSession = sessionmaker(bind=db_engine)
+    with TestingSession() as db:
+        c = ClipCandidate(
+            project_id=project_with_transcripts,
+            title="Momen Epik Turnamen Game",
+            hook="Clutch 1 lawan 4 paling gila!",
+            rationale="Aksi menegangkan.",
+            start_time=20.0,
+            end_time=45.0,
+        )
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        clip_id = c.id
+
+    # 1. GET export-kit before rendering video -> 400
+    fail_resp = client.get(f"/api/clips/{clip_id}/export-kit")
+    assert fail_resp.status_code == 400
+    assert "belum dirender" in fail_resp.json()["detail"].lower()
+
+    # 2. Create dummy rendered MP4 and cover JPG on disk
+    dummy_mp4 = tmp_path / "dummy_render.mp4"
+    dummy_mp4.write_bytes(b"\x00\x00\x00\x20ftypmp42fake_mp4_bytes")
+
+    dummy_cover = tmp_path / "dummy_cover.jpg"
+    dummy_cover.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIFfake_cover_bytes")
+
+    with TestingSession() as db:
+        c_db = db.get(ClipCandidate, clip_id)
+        assert c_db is not None
+        c_db.rendered_file_path = str(dummy_mp4)
+        c_db.cover_file_path = str(dummy_cover)
+        db.commit()
+
+    # 3. GET export-kit -> 200 application/zip
+    with patch("app.services.social_copywriter.settings.GEMINI_API_KEY", None):
+        zip_resp = client.get(f"/api/clips/{clip_id}/export-kit")
+        if zip_resp.status_code != 200:
+            print("ERROR RESPONSE:", zip_resp.status_code, zip_resp.text)
+        assert zip_resp.status_code == 200
+        assert zip_resp.headers["content-type"] == "application/zip"
+        assert "attachment; filename=" in zip_resp.headers.get("content-disposition", "")
+
+    # 4. Verify ZIP content integrity
+    zip_bytes = io.BytesIO(zip_resp.content)
+    with zipfile.ZipFile(zip_bytes, "r") as zf:
+        namelist = zf.namelist()
+        assert any(name.endswith(".mp4") for name in namelist)
+        assert any(name.endswith(".jpg") for name in namelist)
+        assert any(name.endswith("_social_copy.txt") for name in namelist)
+
+        # Inspect social copy text inside zip
+        copy_filename = [n for n in namelist if n.endswith("_social_copy.txt")][0]
+        copy_content = zf.read(copy_filename).decode("utf-8")
+        assert "CLIPPERFORGE 1-CLICK PUBLISHING KIT" in copy_content
+        assert "[1] TIKTOK POSTING KIT" in copy_content
+        assert "[2] YOUTUBE SHORTS POSTING KIT" in copy_content
+        assert "[3] INSTAGRAM REELS POSTING KIT" in copy_content
+
+
+def test_create_manual_clip(client: TestClient, project_with_transcripts: str):
+    """Test manual clip creation for CapCut-style timeline editing."""
+    resp = client.post(
+        f"/api/projects/{project_with_transcripts}/clips/manual",
+        json={
+            "title": "Potongan Manual CapCut",
+            "start_time": 5.0,
+            "end_time": 25.0,
+            "aspect_ratio": "9:16",
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["title"] == "Potongan Manual CapCut"
+    assert data["start_time"] == 5.0
+    assert data["end_time"] == 25.0
+    assert data["category"] == "manual"
+    assert data["project_id"] == project_with_transcripts
+
+
+

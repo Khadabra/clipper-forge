@@ -23,8 +23,12 @@ import {
   CheckCircle2,
   X,
   Sparkles,
+  Archive,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import type { ClipCandidate, ClipCandidateUpdate, ClipStatus } from '../../types/clip';
+import { downloadExportKit } from '../../services/clipsApi';
 import { ExportModal } from './ExportModal';
 import { ClipEditorStudio } from './ClipEditorStudio';
 
@@ -56,6 +60,21 @@ export const ClipCard: React.FC<Props> = ({
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
+  const [isDownloadingKit, setIsDownloadingKit] = useState(false);
+
+  const handleDownloadKit = async () => {
+    setIsDownloadingKit(true);
+    try {
+      await downloadExportKit(
+        clip.id,
+        `${clip.title ? clip.title.replace(/[^a-zA-Z0-9_-]/g, '_') : 'clip'}_export_kit.zip`
+      );
+    } catch (err) {
+      console.error('Gagal mengunduh publishing kit:', err);
+    } finally {
+      setIsDownloadingKit(false);
+    }
+  };
 
   const duration = Math.max(0, clip.end_time - clip.start_time);
   const formatSec = (sec: number) => {
@@ -195,27 +214,113 @@ export const ClipCard: React.FC<Props> = ({
         </div>
 
         {/* Virality Score Badge */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '3px 8px',
-            borderRadius: 'var(--radius-pill)',
-            backgroundColor: scoreBg,
-            border: `1px solid ${scoreBorder}`,
-            color: scoreColor,
-            fontSize: 12,
-            fontWeight: 700,
-            fontFamily: 'var(--font-mono)',
-          }}
-          title="Estimasi Skor Viralitas AI (1-100) berdasarkan retensi hook dan shareability"
-        >
-          <Flame size={13} />
-          <span>{clip.virality_score}</span>
-          <span style={{ fontSize: 10, opacity: 0.7 }}>/100</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {clip.quality_report_json && (() => {
+            try {
+              const q = JSON.parse(clip.quality_report_json);
+              const isPass = q.status === 'pass';
+              const isWarn = q.status === 'warning';
+              return (
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '2px 6px',
+                    borderRadius: 'var(--radius-pill)',
+                    backgroundColor: isPass ? 'rgba(16, 185, 129, 0.1)' : isWarn ? 'rgba(245, 158, 11, 0.1)' : 'rgba(244, 63, 94, 0.1)',
+                    border: `1px solid ${isPass ? 'rgba(16, 185, 129, 0.3)' : isWarn ? 'rgba(245, 158, 11, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
+                    color: isPass ? '#10b981' : isWarn ? '#f59e0b' : '#f43f5e',
+                  }}
+                  title={q.issues && q.issues.length ? q.issues.map((i: any) => i.message).join('\n') : 'Lolos uji broadcast'}
+                >
+                  {isPass ? '✓ Quality Pass' : isWarn ? '⚠️ Quality Warn' : '✕ Quality Fail'}
+                </span>
+              );
+            } catch {
+              return null;
+            }
+          })()}
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 8px',
+              borderRadius: 'var(--radius-pill)',
+              backgroundColor: scoreBg,
+              border: `1px solid ${scoreBorder}`,
+              color: scoreColor,
+              fontSize: 12,
+              fontWeight: 700,
+              fontFamily: 'var(--font-mono)',
+            }}
+            title="Estimasi Skor Viralitas AI (1-100) berdasarkan retensi hook dan shareability"
+          >
+            <Flame size={13} />
+            <span>{clip.virality_score}</span>
+            <span style={{ fontSize: 10, opacity: 0.7 }}>/100</span>
+          </div>
         </div>
       </div>
+
+      {/* Boundary Warnings & Explainable Subscores */}
+      {(clip.starts_mid_sentence || clip.ends_abruptly || clip.subscores_json) && (
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: -4 }}>
+          {clip.starts_mid_sentence && (
+            <span
+              style={{
+                fontSize: 10,
+                color: '#f59e0b',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                padding: '1px 6px',
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <AlertCircle size={10} />
+              Awal terpotong di tengah kalimat
+            </span>
+          )}
+          {clip.ends_abruptly && (
+            <span
+              style={{
+                fontSize: 10,
+                color: '#f59e0b',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                padding: '1px 6px',
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <AlertCircle size={10} />
+              Akhir kalimat menggantung
+            </span>
+          )}
+          {clip.subscores_json && (() => {
+            try {
+              const subs = JSON.parse(clip.subscores_json);
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)' }}>
+                  <span>Hook: <strong style={{ color: '#f4f4f5' }}>{subs.hook_strength || 80}</strong></span>
+                  <span>·</span>
+                  <span>Cerita: <strong style={{ color: '#f4f4f5' }}>{subs.narrative_coherence || 80}</strong></span>
+                  <span>·</span>
+                  <span>Audio: <strong style={{ color: '#f4f4f5' }}>{subs.audio_clarity || 90}</strong></span>
+                </div>
+              );
+            } catch {
+              return null;
+            }
+          })()}
+        </div>
+      )}
 
       {/* Title */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
@@ -538,6 +643,36 @@ export const ClipCard: React.FC<Props> = ({
             <Share2 size={13} />
             {clip.render_status === 'completed' ? 'Lihat Hasil Render' : 'Siapkan untuk Ekspor'}
           </button>
+
+          {clip.render_status === 'completed' && (
+            <button
+              id={`btn-download-kit-${clip.id}`}
+              type="button"
+              className="btn btn-secondary"
+              style={{
+                fontSize: 12,
+                padding: '6px 11px',
+                height: '32px',
+                backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                border: '1px solid rgba(16, 185, 129, 0.35)',
+                color: '#34d399',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+              onClick={handleDownloadKit}
+              disabled={isDownloadingKit}
+              title="Unduh 1-Click Publishing Kit (.zip) berisi Video MP4 9:16 + Cover JPG + Teks Copywriting"
+            >
+              {isDownloadingKit ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Archive size={13} />
+              )}
+              {isDownloadingKit ? 'Mengunduh...' : 'Kit (.zip)'}
+            </button>
+          )}
 
           <button
             type="button"

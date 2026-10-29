@@ -27,7 +27,6 @@ interface NavItem {
   id: string;
   label: string;
   icon: React.ElementType;
-  isPlanned?: boolean;
 }
 
 interface NavGroup {
@@ -45,30 +44,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: 'Media & Editing',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'projects', label: 'Projects / Import', icon: Film },       // M2: Active
-        { id: 'clip-finder', label: 'Clip Finder', icon: Scissors, isPlanned: true },
-        { id: 'editor', label: 'Video Editor', icon: Sliders, isPlanned: true },
-        { id: 'captions', label: 'Caption Studio', icon: Type, isPlanned: true },
-        { id: 'music', label: 'Music Studio', icon: Music, isPlanned: true },
-        { id: 'exports', label: 'Exports', icon: Download, isPlanned: true },
+        { id: 'projects', label: 'Projects / Import', icon: Film },
+        { id: 'clip-finder', label: 'Clip Finder', icon: Scissors },
+        { id: 'editor', label: 'Video Editor', icon: Sliders },
+        { id: 'captions', label: 'Caption Studio', icon: Type },
+        { id: 'music', label: 'Music Studio', icon: Music },
+        { id: 'exports', label: 'Exports', icon: Download },
       ],
     },
     {
       title: 'AI Studio & Publishing',
       items: [
-        { id: 'ai-studio', label: 'AI Creative Studio', icon: Sparkles, isPlanned: true },
-        { id: 'threads-writer', label: 'Threads Writer', icon: MessageSquareShare, isPlanned: true },
-        { id: 'raw-ideas', label: 'Raw Ideas to Content', icon: Lightbulb, isPlanned: true },
-        { id: 'repurposing', label: 'Content Repurposing', icon: Repeat, isPlanned: true },
-        { id: 'calendar', label: 'Content Calendar', icon: Calendar, isPlanned: true },
-        { id: 'ideas-library', label: 'Ideas & Copy Library', icon: Bookmark, isPlanned: true },
+        { id: 'ai-studio', label: 'AI Creative Studio', icon: Sparkles },
+        { id: 'threads-writer', label: 'Threads Writer', icon: MessageSquareShare },
+        { id: 'raw-ideas', label: 'Raw Ideas to Content', icon: Lightbulb },
+        { id: 'repurposing', label: 'Content Repurposing', icon: Repeat },
+        { id: 'calendar', label: 'Content Calendar', icon: Calendar },
+        { id: 'ideas-library', label: 'Ideas & Copy Library', icon: Bookmark },
       ],
     },
     {
       title: 'Workspace & System',
       items: [
-        { id: 'brand-kit', label: 'Style Presets / Brand Kit', icon: Palette, isPlanned: true },
-        { id: 'settings', label: 'System & AI Settings', icon: Settings, isPlanned: true },
+        { id: 'brand-kit', label: 'Style Presets / Brand Kit', icon: Palette },
+        { id: 'settings', label: 'System & AI Settings', icon: Settings },
       ],
     },
   ];
@@ -104,9 +103,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <IconComponent className="nav-icon" />
                         <span>{item.label}</span>
                       </div>
-                      {item.isPlanned && (
-                        <span className="planned-badge">M{item.id === 'projects' ? '2' : '4+'}</span>
-                      )}
                     </button>
                   </li>
                 );

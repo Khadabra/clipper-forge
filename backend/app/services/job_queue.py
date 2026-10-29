@@ -49,8 +49,16 @@ class JobQueue:
 
     async def start(self) -> None:
         """Start the background worker."""
-        if self._running:
+        current_loop = asyncio.get_running_loop()
+        if (
+            self._running
+            and self._worker_task
+            and not self._worker_task.done()
+            and self._queue is not None
+            and getattr(self._queue, "_loop", None) is current_loop
+        ):
             return
+
         self._queue = asyncio.Queue()
         self._running = True
         self._worker_task = asyncio.create_task(self._worker_loop())
@@ -63,15 +71,23 @@ class JobQueue:
             self._worker_task.cancel()
             try:
                 await self._worker_task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 pass
             self._worker_task = None
+        self._queue = None
         logger.info("JobQueue background worker stopped")
 
     async def enqueue(self, job_id: str) -> None:
         """Enqueue a job ID to be processed."""
-        if not self._running or self._queue is None:
-            # Auto-start if not running
+        current_loop = asyncio.get_running_loop()
+        if (
+            not self._running
+            or self._queue is None
+            or self._worker_task is None
+            or self._worker_task.done()
+            or getattr(self._queue, "_loop", None) is not current_loop
+        ):
+            # Auto-start if not running or previous worker task terminated or loop changed
             await self.start()
         assert self._queue is not None
         await self._queue.put(job_id)
@@ -116,11 +132,10 @@ class JobQueue:
 
     async def _worker_loop(self) -> None:
         """Continuous consumer loop for jobs."""
-        assert self._queue is not None
-        while self._running:
+        while self._running and self._queue is not None:
             try:
                 job_id = await self._queue.get()
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, RuntimeError):
                 break
 
             try:
@@ -128,7 +143,11 @@ class JobQueue:
             except Exception as exc:
                 logger.exception(f"Unhandled error processing job '{job_id}': {exc}")
             finally:
-                self._queue.task_done()
+                if self._queue is not None:
+                    try:
+                        self._queue.task_done()
+                    except Exception:
+                        pass
 
     async def _process_job(self, job_id: str) -> None:
         """Execute a single job."""
@@ -168,11 +187,14 @@ class JobQueue:
         # 3. Define progress reporter
         def set_progress(pct: int) -> None:
             clamped = max(0, min(100, int(pct)))
-            with self.session_factory() as db:
-                j = db.get(Job, job_id)
-                if j and j.status == JobStatus.PROCESSING.value:
-                    j.progress = clamped
-                    db.commit()
+            try:
+                with self.session_factory() as db:
+                    j = db.get(Job, job_id)
+                    if j and j.status == JobStatus.PROCESSING.value:
+                        j.progress = clamped
+                        db.commit()
+            except Exception:
+                pass
 
         # 4. Execute handler (in thread pool to avoid blocking async event loop)
         try:
@@ -363,11 +385,10 @@ def transcribe_handler(
         save_transcript_segments,
     )
 
-    # 1. Fetch Job and Project
     with job_queue.session_factory() as db:
         job = db.get(Job, job_id)
         if not job:
-            return
+            raise ValueError(f"Job '{job_id}' not found in database.")
         project = db.get(Project, job.project_id)
         if not project:
             raise ValueError(f"Project '{job.project_id}' not found.")
@@ -417,6 +438,7 @@ def transcribe_handler(
             proj = db.get(Project, project_id)
             if proj:
                 proj.status = "transcribed"
+                db.add(proj)
                 db.commit()
 
         set_progress(100)
@@ -577,11 +599,42 @@ def render_clip_handler(
         auto_zoom = params.get("auto_zoom") or getattr(clip, "auto_zoom", "subtle") or "subtle"
         custom_transcript_json = getattr(clip, "custom_transcript_json", None)
         headline_text = params.get("headline_text") or clip.hook or clip.title or ""
+        intro_hook_banner = params.get("show_hook_banner") if params.get("show_hook_banner") is not None else params.get("intro_hook_banner")
+        if intro_hook_banner is None:
+            intro_hook_banner = getattr(clip, "intro_hook_banner", True)
+        enable_sfx = params.get("enable_sfx", True)
+        framing_offset_pct = float(params.get("framing_offset_pct", 0.0) or 0.0)
+        crop_x_pct = float(params.get("crop_x_pct") if params.get("crop_x_pct") is not None else getattr(clip, "crop_x_pct", 0.50) or 0.50)
+        remove_silence = bool(params.get("remove_silence") if params.get("remove_silence") is not None else getattr(clip, "remove_silence", False))
+        auto_emoji = bool(params.get("auto_emoji") if params.get("auto_emoji") is not None else getattr(clip, "auto_emoji", True))
+        bgm_track_id = params.get("bgm_track_id") or getattr(clip, "bgm_track_id", None)
+        raw_bgm_vol = params.get("bgm_volume")
+        if raw_bgm_vol is not None:
+            bgm_volume = float(raw_bgm_vol)
+        else:
+            bgm_volume = float(getattr(clip, "bgm_volume", 0.18) or 0.18)
+
+        soundboard_cues = params.get("soundboard_cues")
+        if soundboard_cues is None and getattr(clip, "soundboard_cues_json", None):
+            try:
+                parsed_cues = json.loads(clip.soundboard_cues_json)
+                if isinstance(parsed_cues, list):
+                    soundboard_cues = parsed_cues
+            except Exception:
+                soundboard_cues = []
+        if not isinstance(soundboard_cues, list):
+            soundboard_cues = []
 
         clip.aspect_ratio = aspect_ratio
         clip.subtitle_style = subtitle_style
         clip.crop_mode = crop_mode
         clip.auto_zoom = auto_zoom
+        clip.intro_hook_banner = intro_hook_banner
+        clip.crop_x_pct = crop_x_pct
+        clip.remove_silence = remove_silence
+        clip.auto_emoji = auto_emoji
+        clip.bgm_track_id = bgm_track_id
+        clip.bgm_volume = bgm_volume
         clip.render_status = "rendering"
         db.commit()
 
@@ -610,15 +663,39 @@ def render_clip_handler(
             segments=segments,
             custom_transcript_json=custom_transcript_json,
             headline_text=headline_text,
+            intro_hook_banner=intro_hook_banner,
+            enable_sfx=enable_sfx,
+            framing_offset_pct=framing_offset_pct,
+            crop_x_pct=crop_x_pct,
+            remove_silence=remove_silence,
+            auto_emoji=auto_emoji,
+            bgm_track_id=bgm_track_id,
+            bgm_volume=bgm_volume,
+            soundboard_cues=soundboard_cues,
             set_progress=set_progress,
             cancel_event=cancel_event,
         )
+
+        # Run automated quality gate
+        try:
+            from app.services.quality_gate import run_quality_gate
+            q_report = run_quality_gate(
+                video_path=output_path,
+                expected_duration=(end_time - start_time),
+                expected_aspect_ratio=aspect_ratio,
+            )
+            q_report_json = q_report.model_dump_json()
+        except Exception as q_exc:
+            logger.warning(f"Quality gate check failed: {q_exc}")
+            q_report_json = None
 
         with job_queue.session_factory() as db:
             c = db.get(ClipCandidate, clip_id)
             if c:
                 c.rendered_file_path = str(output_path)
                 c.render_status = "completed"
+                if q_report_json:
+                    c.quality_report_json = q_report_json
                 db.commit()
 
         set_progress(100)

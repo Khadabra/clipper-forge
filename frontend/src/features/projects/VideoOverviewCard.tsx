@@ -4,7 +4,7 @@
  */
 import type React from 'react';
 import { useRef, useState } from 'react';
-import { ArrowRight, Film } from 'lucide-react';
+import { ArrowRight, Film, Scissors } from 'lucide-react';
 import type { Project } from '../../types/project';
 import {
   formatDuration,
@@ -156,7 +156,8 @@ export const VideoOverviewCard: React.FC<Props> = ({ project, onContinue }) => {
           type="button"
           style={{ marginTop: 16 }}
         >
-          Lanjut ke Editor Vertikal (Milestone 5)
+          <Scissors size={14} />
+          Buka di Studio Editor Vertikal
           <ArrowRight size={14} />
         </button>
       )}

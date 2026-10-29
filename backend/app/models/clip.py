@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -43,7 +43,7 @@ class ClipCandidate(Base):
     # Status: 'suggested' | 'approved' | 'rejected'
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="suggested")
 
-    # Milestone 5 & 6: Export, Auto-Zoom & Subtitle Customization metadata
+    # Export, Auto-Zoom & Subtitle Customization metadata
     rendered_file_path: Mapped[str | None] = mapped_column(
         String(512), nullable=True, default=None
     )
@@ -65,7 +65,82 @@ class ClipCandidate(Base):
     render_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="idle"
     )
+    crop_x_pct: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.50
+    )
+    remove_silence: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    auto_emoji: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+
+    # Active Speaker Tracking & Fallback metadata
+    tracking_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="active_speaker"
+    )
+    tracking_confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0
+    )
+    tracking_fallback_reason: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, default=None
+    )
+
+    # Quality Gate Inspection Report JSON
+    quality_report_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+
+    # Explainable AI Sub-scores & Boundary Integrity
+    subscores_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    starts_mid_sentence: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    ends_abruptly: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+
+    # Intro Hook Banner (seconds 0-3) & Cover Grabber metadata
+    intro_hook_banner: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    cover_file_path: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, default=None
+    )
+
+    # Background Music (BGM) & Auto-Ducking
+    bgm_track_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    bgm_volume: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.18
+    )
+
+    # AI Social Media Copywriter JSON metadata
+    social_copy_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+
+    # Meme Soundboard & Reaction SFX Cues JSON
+    soundboard_cues_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default="[]"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )
+
+    @property
+    def duration(self) -> float:
+        return max(0.0, round(self.end_time - self.start_time, 2))
+
+    @property
+    def show_hook_banner(self) -> bool:
+        return self.intro_hook_banner
+
+    @show_hook_banner.setter
+    def show_hook_banner(self, value: bool) -> None:
+        self.intro_hook_banner = value
+

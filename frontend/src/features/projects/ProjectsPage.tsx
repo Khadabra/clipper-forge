@@ -15,9 +15,16 @@ import {
   deleteProject,
 } from '../../services/projectsApi';
 import { cancelJob, subscribeJobEvents } from '../../services/jobsApi';
+import { fetchClips, createManualClip } from '../../services/clipsApi';
 import type { Project, ProjectListItem } from '../../types/project';
+import type { ClipCandidate } from '../../types/clip';
+import { ClipEditorStudio } from '../clips/ClipEditorStudio';
 
 type IngestTab = 'file' | 'youtube';
+
+interface ProjectsPageProps {
+  onOpenEditor?: (clip: ClipCandidate) => void;
+}
 
 type IngestState =
   | { status: 'idle' }
@@ -33,14 +40,45 @@ type IngestState =
   | { status: 'success'; project: Project }
   | { status: 'error'; message: string };
 
-export function ProjectsPage() {
+export function ProjectsPage({ onOpenEditor }: ProjectsPageProps = {}) {
   const [tab, setTab] = useState<IngestTab>('file');
   const [ingestState, setIngestState] = useState<IngestState>({ status: 'idle' });
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [activeStudioClip, setActiveStudioClip] = useState<ClipCandidate | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const ytUnsubRef = useRef<(() => void) | null>(null);
+
+  // ── Continue to Vertical Studio Editor (AI or Manual CapCut-style) ───────────
+  const handleContinueToEditor = async (project: Project) => {
+    try {
+      const res = await fetchClips(project.id);
+      if (res.clips && res.clips.length > 0) {
+        if (onOpenEditor) {
+          onOpenEditor(res.clips[0]);
+        } else {
+          setActiveStudioClip(res.clips[0]);
+        }
+        return;
+      }
+
+      // If no clip exists yet, generate an instant manual clip and open editor immediately
+      const dur = project.duration || 60;
+      const newClip = await createManualClip(project.id, {
+        title: `${project.title || 'Klip'} (Manual)`,
+        start_time: 0.0,
+        end_time: Math.min(dur, 30.0),
+      });
+      if (onOpenEditor) {
+        onOpenEditor(newClip);
+      } else {
+        setActiveStudioClip(newClip);
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Gagal membuka studio editor.');
+    }
+  };
 
   // ── Cleanup SSE on unmount ─────────────────────────────────────────────────
   useEffect(() => {
@@ -505,7 +543,7 @@ export function ProjectsPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <VideoOverviewCard
                   project={ingestState.project}
-                  onContinue={() => alert('Fitur Editor Vertikal 9:16 & Caption Styler akan tersedia di Milestone 5!')}
+                  onContinue={() => handleContinueToEditor(ingestState.project)}
                 />
                 <div className="divider" />
                 <button
@@ -550,6 +588,19 @@ export function ProjectsPage() {
           </div>
         </div>
       </div>
+
+      {/* Standalone Interactive Studio Editor Overlay */}
+      {activeStudioClip && (
+        <ClipEditorStudio
+          clip={activeStudioClip}
+          isOpen={Boolean(activeStudioClip)}
+          onClose={() => setActiveStudioClip(null)}
+          onClipUpdated={(c) => {
+            setActiveStudioClip(c);
+            loadProjects();
+          }}
+        />
+      )}
     </div>
   );
 }

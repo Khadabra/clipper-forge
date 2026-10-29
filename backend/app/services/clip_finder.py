@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -65,6 +66,86 @@ def _get_seg_attr(seg: Any, attr: str, default: Any = None) -> Any:
     return getattr(seg, attr, default)
 
 
+def evaluate_clip_subscores_and_boundaries(
+    segments: list[Any],
+    start_time: float,
+    end_time: float,
+    hook_text: str = "",
+    category: str = "insight",
+    base_virality: int | None = None,
+) -> tuple[dict[str, int], bool, bool]:
+    """
+    Evaluates explainable quality subscores (0-100) and checks boundary integrity
+    (whether the clip starts mid-sentence or ends abruptly).
+    """
+    overlapping = []
+    for s in segments:
+        st = float(_get_seg_attr(s, "start_time", 0.0))
+        et = float(_get_seg_attr(s, "end_time", 0.0))
+        if et >= start_time and st <= end_time:
+            overlapping.append(s)
+
+    starts_mid_sentence = False
+    ends_abruptly = False
+
+    if overlapping:
+        first_txt = str(_get_seg_attr(overlapping[0], "text", "")).strip()
+        last_txt = str(_get_seg_attr(overlapping[-1], "text", "")).strip()
+
+        # Check start boundary for mid-sentence cuts or lowercased leading conjunctions
+        mid_sentence_conjunctions = {
+            "dan", "tapi", "karena", "sehingga", "yang", "atau", "terus",
+            "nah", "jadi", "padahal", "sedangkan", "yaitu", "bahwa",
+        }
+        first_word = first_txt.split()[0].lower() if first_txt.split() else ""
+        first_word_clean = re.sub(r"[^\w]", "", first_word)
+        if first_txt and (first_txt[0].islower() or first_word_clean in mid_sentence_conjunctions):
+            starts_mid_sentence = True
+
+        # Check end boundary
+        if last_txt and not last_txt.endswith((".", "!", "?", '"', '..."', "…")):
+            ends_abruptly = True
+
+    # Compute explainable subscores
+    hook_strength = 75
+    if any(q in hook_text.lower() for q in ["kenapa", "mengapa", "rahasia", "ternyata", "gimana", "jangan", "fakta", "?", "!"]):
+        hook_strength += 15
+    if starts_mid_sentence:
+        hook_strength -= 10
+    hook_strength = max(35, min(98, hook_strength))
+
+    narrative_coherence = 85
+    if starts_mid_sentence:
+        narrative_coherence -= 15
+    if ends_abruptly:
+        narrative_coherence -= 15
+    narrative_coherence = max(35, min(95, narrative_coherence))
+
+    emotional_interest = 80 if category in ("controversy", "humor", "story") else 75
+    if "!" in hook_text:
+        emotional_interest += 8
+    emotional_interest = max(35, min(95, emotional_interest))
+
+    audio_clarity = 90
+    visual_suitability = 85
+
+    if base_virality is not None:
+        target_avg = base_virality
+        curr_avg = int(0.3 * hook_strength + 0.25 * narrative_coherence + 0.2 * emotional_interest + 0.15 * audio_clarity + 0.1 * visual_suitability)
+        delta = target_avg - curr_avg
+        hook_strength = max(20, min(99, hook_strength + delta))
+        narrative_coherence = max(20, min(99, narrative_coherence + delta))
+
+    subscores = {
+        "hook_strength": hook_strength,
+        "narrative_coherence": narrative_coherence,
+        "emotional_interest": emotional_interest,
+        "audio_clarity": audio_clarity,
+        "visual_suitability": visual_suitability,
+    }
+    return subscores, starts_mid_sentence, ends_abruptly
+
+
 def _fallback_curate_clips(
     segments: list[Any],
     max_duration: float = 600.0,
@@ -97,6 +178,17 @@ def _fallback_curate_clips(
                 first_sentence = current_text[0] if current_text else "Momen Pembahasan Video"
                 hook = first_sentence[:80] + ("..." if len(first_sentence) > 80 else "")
                 title = f"Sorotan: {hook[:45]}"
+                cat = categories[cat_idx % len(categories)]
+                raw_score = 75 + (cat_idx % 15)
+
+                subscores, mid_cut, abrupt_end = evaluate_clip_subscores_and_boundaries(
+                    segments=segments,
+                    start_time=current_start,
+                    end_time=min(seg_end, max_duration),
+                    hook_text=hook,
+                    category=cat,
+                    base_virality=raw_score,
+                )
 
                 candidates.append({
                     "title": title,
@@ -104,8 +196,11 @@ def _fallback_curate_clips(
                     "rationale": f"[Kurasi Otomatis] Segmen padat informasi berdurasi {round(duration, 1)} detik dengan alur percakapan utuh.",
                     "start_time": round(current_start, 2),
                     "end_time": round(min(seg_end, max_duration), 2),
-                    "category": categories[cat_idx % len(categories)],
-                    "virality_score": 75 + (cat_idx % 15),
+                    "category": cat,
+                    "virality_score": raw_score,
+                    "subscores_json": json.dumps(subscores),
+                    "starts_mid_sentence": mid_cut,
+                    "ends_abruptly": abrupt_end,
                 })
                 cat_idx += 1
 
@@ -123,6 +218,7 @@ def curate_clips_with_gemini(
     segments: list[Any] | None = None,
     video_duration: float = 600.0,
     project_title: str | None = None,
+    db: Session | None = None,
 ) -> list[dict[str, Any]]:
     """
     Send transcript to Google Gemini API and parse structured clip candidates.
@@ -169,6 +265,18 @@ def curate_clips_with_gemini(
             config=config,
         )
 
+        # Log Gemini token consumption
+        try:
+            from app.services.token_tracker import log_gemini_usage
+            log_gemini_usage(
+                db=db,
+                feature_name="clip_finder",
+                model_name="gemini-2.5-flash",
+                response=response,
+            )
+        except Exception as log_err:
+            logger.debug(f"Failed to log clip_finder token usage: {log_err}")
+
         response_text = response.text or ""
         cleaned = _clean_json_response(response_text)
         data = json.loads(cleaned)
@@ -195,6 +303,27 @@ def curate_clips_with_gemini(
             if end_t - start_t < 10.0:
                 continue
 
+            raw_virality = int(max(1, min(100, item.get("virality_score", 70))))
+            subscores_data = item.get("subscores")
+            if isinstance(subscores_data, dict):
+                subscores = subscores_data
+                _, mid_cut, abrupt_end = evaluate_clip_subscores_and_boundaries(
+                    segments=segments,
+                    start_time=start_t,
+                    end_time=end_t,
+                    hook_text=str(item.get("hook", "")),
+                    category=str(item.get("category", "insight")),
+                )
+            else:
+                subscores, mid_cut, abrupt_end = evaluate_clip_subscores_and_boundaries(
+                    segments=segments,
+                    start_time=start_t,
+                    end_time=end_t,
+                    hook_text=str(item.get("hook", "")),
+                    category=str(item.get("category", "insight")),
+                    base_virality=raw_virality,
+                )
+
             valid_clips.append({
                 "title": str(item.get("title", "Klip Viral Pilihan"))[:255],
                 "hook": str(item.get("hook", ""))[:512],
@@ -202,7 +331,10 @@ def curate_clips_with_gemini(
                 "start_time": round(start_t, 2),
                 "end_time": round(end_t, 2),
                 "category": str(item.get("category", "insight")).lower()[:64],
-                "virality_score": int(max(1, min(100, item.get("virality_score", 70)))),
+                "virality_score": raw_virality,
+                "subscores_json": json.dumps(subscores),
+                "starts_mid_sentence": mid_cut,
+                "ends_abruptly": abrupt_end,
             })
 
         if valid_clips:
@@ -242,6 +374,7 @@ def save_clip_candidates(
     records: list[ClipCandidate] = []
     for c in clips:
         candidate = ClipCandidate(
+            id=str(uuid.uuid4()),
             project_id=project_id,
             title=c["title"],
             hook=c["hook"],
@@ -251,12 +384,18 @@ def save_clip_candidates(
             virality_score=c["virality_score"],
             category=c["category"],
             status="suggested",
+            subscores_json=c.get("subscores_json"),
+            starts_mid_sentence=c.get("starts_mid_sentence", False),
+            ends_abruptly=c.get("ends_abruptly", False),
         )
         db.add(candidate)
         records.append(candidate)
 
     db.commit()
     for r in records:
-        db.refresh(r)
+        try:
+            db.refresh(r)
+        except Exception:
+            pass
 
     return records

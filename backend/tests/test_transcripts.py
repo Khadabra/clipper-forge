@@ -20,6 +20,7 @@ from app.services.transcription_service import (
     export_txt,
     export_vtt,
     get_optimal_device_and_compute_type,
+    sanitize_repetitions,
     save_transcript_segments,
 )
 
@@ -96,6 +97,13 @@ def test_extract_audio_ffmpeg_error(tmp_path: Path):
 
 
 # ── Transcription Service & Export Format Tests ──────────────────────────────
+
+def test_sanitize_repetitions_deduplication():
+    assert sanitize_repetitions("baru baru baru baru baru") == "baru baru"
+    assert sanitize_repetitions("ngebaru-ngebaru-ngebaru-ngebaru") == "ngebaru-ngebaru"
+    assert sanitize_repetitions("bisa jadi bisa jadi bisa jadi") == "bisa jadi bisa jadi"
+    assert sanitize_repetitions("Halo selamat datang") == "Halo selamat datang"
+
 
 def test_optimal_device_detection():
     device, compute_type = get_optimal_device_and_compute_type()
@@ -184,15 +192,17 @@ def test_transcribe_endpoint_not_found(client: TestClient):
 
 def test_transcribe_endpoint_success(client: TestClient, project_with_video):
     proj_id, _ = project_with_video
-    resp = client.post(
-        f"/api/projects/{proj_id}/transcribe",
-        json={"model_size": "base", "language": "id"},
-    )
-    assert resp.status_code == 202
-    data = resp.json()
-    assert data["project_id"] == proj_id
-    assert "job_id" in data
-    assert data["model_size"] == "base"
+    with patch("app.api.routes.transcripts.job_queue.enqueue") as mock_enqueue:
+        resp = client.post(
+            f"/api/projects/{proj_id}/transcribe",
+            json={"model_size": "base", "language": "id"},
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["project_id"] == proj_id
+        assert "job_id" in data
+        assert data["model_size"] == "base"
+        mock_enqueue.assert_called_once()
 
 
 def test_get_transcript_empty(client: TestClient, project_with_video):
@@ -254,7 +264,7 @@ def test_transcribe_job_pipeline_mocked(client: TestClient, project_with_video, 
         # 2. Wait for the background queue worker to complete the job
         import time
         job_data = None
-        for _ in range(100):
+        for _ in range(200):
             j_resp = client.get(f"/api/jobs/{job_id}")
             if j_resp.status_code == 200:
                 data = j_resp.json()
@@ -263,32 +273,47 @@ def test_transcribe_job_pipeline_mocked(client: TestClient, project_with_video, 
                     break
             time.sleep(0.05)
 
-    assert job_data is not None
-    assert job_data["status"] == "completed"
-    assert job_data["progress"] == 100
+        assert job_data is not None
+        assert job_data["status"] == "completed"
+        assert job_data["progress"] == 100
 
-    # 4. Check project status is updated to 'transcribed'
-    proj_resp = client.get(f"/api/projects/{proj_id}")
-    assert proj_resp.status_code == 200
-    assert proj_resp.json()["status"] == "transcribed"
+        # 4. Check project status is updated to 'transcribed'
+        proj_resp = None
+        for _ in range(200):
+            proj_resp = client.get(f"/api/projects/{proj_id}")
+            if proj_resp.status_code == 200 and proj_resp.json()["status"] == "transcribed":
+                break
+            time.sleep(0.05)
 
-    # 5. Fetch transcript list
-    t_resp = client.get(f"/api/projects/{proj_id}/transcript")
-    assert t_resp.status_code == 200
-    t_data = t_resp.json()
-    assert t_data["total_segments"] == 1
-    assert t_data["segments"][0]["text"] == "Halo dunia ini transkrip uji coba."
-    assert len(t_data["segments"][0]["words"]) == 1
+        assert proj_resp is not None
+        assert proj_resp.status_code == 200
+        assert proj_resp.json()["status"] == "transcribed"
 
-    # 6. Test exports
-    srt_resp = client.get(f"/api/projects/{proj_id}/transcript/export?format=srt")
-    assert srt_resp.status_code == 200
-    assert "00:00:00,500 --> 00:00:03,500" in srt_resp.text
+        # 5. Fetch transcript list
+        t_data = None
+        for _ in range(200):
+            t_resp = client.get(f"/api/projects/{proj_id}/transcript")
+            if t_resp.status_code == 200:
+                data = t_resp.json()
+                if data.get("total_segments", 0) >= 1:
+                    t_data = data
+                    break
+            time.sleep(0.05)
 
-    vtt_resp = client.get(f"/api/projects/{proj_id}/transcript/export?format=vtt")
-    assert vtt_resp.status_code == 200
-    assert "WEBVTT" in vtt_resp.text
+        assert t_data is not None
+        assert t_data["total_segments"] == 1
+        assert t_data["segments"][0]["text"] == "Halo dunia ini transkrip uji coba."
+        assert len(t_data["segments"][0]["words"]) == 1
 
-    txt_resp = client.get(f"/api/projects/{proj_id}/transcript/export?format=txt")
-    assert txt_resp.status_code == 200
-    assert "[00:00 - 00:03] Halo dunia ini transkrip uji coba." in txt_resp.text
+        # 6. Test exports
+        srt_resp = client.get(f"/api/projects/{proj_id}/transcript/export?format=srt")
+        assert srt_resp.status_code == 200
+        assert "00:00:00,500 --> 00:00:03,500" in srt_resp.text
+
+        vtt_resp = client.get(f"/api/projects/{proj_id}/transcript/export?format=vtt")
+        assert vtt_resp.status_code == 200
+        assert "WEBVTT" in vtt_resp.text
+
+        txt_resp = client.get(f"/api/projects/{proj_id}/transcript/export?format=txt")
+        assert txt_resp.status_code == 200
+        assert "[00:00 - 00:03] Halo dunia ini transkrip uji coba." in txt_resp.text

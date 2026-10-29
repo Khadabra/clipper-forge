@@ -52,58 +52,68 @@ export const ProjectList: React.FC<Props> = ({
           onKeyDown={(e) => e.key === 'Enter' && onSelect?.(proj)}
           aria-label={`Buka proyek: ${proj.title}`}
         >
-          {/* Thumbnail placeholder */}
+          {/* Thumbnail preview with duration badge */}
           <div className="project-row-thumb" aria-hidden>
-            <Film size={12} />
+            {proj.thumbnail_url ? (
+              <img src={proj.thumbnail_url} alt="" />
+            ) : (
+              <Film size={14} />
+            )}
+            {proj.duration ? (
+              <span className="project-thumb-duration">{formatDuration(proj.duration)}</span>
+            ) : null}
           </div>
 
-          {/* Info */}
+          {/* Structured Info Card */}
           <div className="project-row-info">
-            <div className="project-row-title">{proj.title}</div>
+            <div className="project-row-top">
+              <span className="project-row-title" title={proj.title}>
+                {proj.title}
+              </span>
+              {onDelete && (
+                <button
+                  id={`btn-delete-${proj.id}`}
+                  className="project-delete-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(proj.id);
+                  }}
+                  disabled={deletingId === proj.id}
+                  aria-label={`Hapus proyek ${proj.title}`}
+                  title="Hapus proyek"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+
             <div className="project-row-meta">
-              <span>{formatDuration(proj.duration)}</span>
               <span>{getResolutionLabel(proj.height)}</span>
+              <span>·</span>
               <span>{formatFileSize(proj.file_size_bytes)}</span>
-              <span>{formatRelativeDate(proj.created_at)}</span>
+            </div>
+
+            <div className="project-row-bottom">
+              <span
+                className={`status-pill ${
+                  proj.status === 'ready'
+                    ? 'ready'
+                    : proj.status === 'failed'
+                    ? 'danger'
+                    : 'neutral'
+                }`}
+              >
+                {proj.status === 'ready'
+                  ? 'Siap'
+                  : proj.status === 'failed'
+                  ? 'Gagal'
+                  : proj.status === 'processing'
+                  ? 'Diproses'
+                  : 'Diunggah'}
+              </span>
+              <span className="project-row-date">{formatRelativeDate(proj.created_at)}</span>
             </div>
           </div>
-
-          {/* Status */}
-          <span
-            className={`status-pill ${
-              proj.status === 'ready'
-                ? 'ready'
-                : proj.status === 'failed'
-                ? 'danger'
-                : 'neutral'
-            }`}
-            style={{ fontSize: 10 }}
-          >
-            {proj.status === 'ready'
-              ? 'Siap'
-              : proj.status === 'failed'
-              ? 'Gagal'
-              : proj.status === 'processing'
-              ? 'Diproses'
-              : 'Diunggah'}
-          </span>
-
-          {/* Delete */}
-          {onDelete && (
-            <button
-              id={`btn-delete-${proj.id}`}
-              className="btn btn-danger btn-sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(proj.id);
-              }}
-              disabled={deletingId === proj.id}
-              aria-label={`Hapus proyek ${proj.title}`}
-              style={{ padding: '4px 8px' }}
-            >
-              <Trash2 size={12} />
-            </button>
-          )}
         </div>
       ))}
     </div>

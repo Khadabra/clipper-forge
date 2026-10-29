@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import health, system
-from app.api.routes import projects, jobs, transcripts, clips
+from app.api.routes import projects, jobs, transcripts, clips, music, soundboard, tokens
 from app.core.config import settings
 from app.db.session import init_db
 from app.services.job_queue import job_queue
@@ -43,6 +43,9 @@ app.include_router(projects.router, prefix=f"{settings.API_V1_STR}", tags=["Proj
 app.include_router(jobs.router, prefix=f"{settings.API_V1_STR}", tags=["Jobs"])
 app.include_router(transcripts.router, prefix=f"{settings.API_V1_STR}", tags=["Transcripts"])
 app.include_router(clips.router, prefix=f"{settings.API_V1_STR}", tags=["Clips"])
+app.include_router(music.router, prefix=f"{settings.API_V1_STR}", tags=["Music"])
+app.include_router(soundboard.router, prefix=f"{settings.API_V1_STR}", tags=["Soundboard"])
+app.include_router(tokens.router, prefix=f"{settings.API_V1_STR}", tags=["Tokens"])
 
 
 @app.get("/")

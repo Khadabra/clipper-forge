@@ -20,9 +20,12 @@ import {
   AlertCircle,
   Smartphone,
   Square,
+  RectangleVertical,
   Monitor,
   Sparkles,
   RotateCcw,
+  Music,
+  Archive,
 } from 'lucide-react';
 import type {
   AspectRatio,
@@ -32,9 +35,11 @@ import type {
   SubtitleStyle,
 } from '../../types/clip';
 import {
+  downloadExportKit,
   downloadRenderedClip,
   getRenderedClipStreamUrl,
   triggerRenderClip,
+  updateClip,
 } from '../../services/clipsApi';
 import { subscribeJobEvents } from '../../services/jobsApi';
 
@@ -62,13 +67,18 @@ const normalizeSubtitleStyle = (style?: string): SubtitleStyle => {
 };
 
 const normalizeCropMode = (mode?: string): CropMode => {
-  if (mode === 'center_crop' || mode === 'framed_headline' || mode === 'speaker_track') return mode;
+  if (
+    mode === 'center_crop' ||
+    mode === 'framed_headline' ||
+    mode === 'speaker_track' ||
+    mode === 'streamer_split'
+  ) return mode;
   return 'blur_fill';
 };
 
 const normalizeAutoZoom = (zoom?: string): AutoZoom => {
-  if (zoom === 'snap_hook' || zoom === 'none') return zoom;
-  return 'subtle';
+  if (zoom === 'snap_hook' || zoom === 'none' || zoom === 'jump_cut') return zoom as AutoZoom;
+  return 'snap_hook';
 };
 
 export const ExportModal: React.FC<Props> = ({
@@ -81,6 +91,11 @@ export const ExportModal: React.FC<Props> = ({
   const [cropMode, setCropMode] = useState<CropMode>(normalizeCropMode(clip.crop_mode));
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(normalizeSubtitleStyle(clip.subtitle_style));
   const [autoZoom, setAutoZoom] = useState<AutoZoom>(normalizeAutoZoom(clip.auto_zoom));
+  const [introHookBanner, setIntroHookBanner] = useState<boolean>(clip.intro_hook_banner !== false);
+  const [bgmTrackId, setBgmTrackId] = useState<string | null>(clip.bgm_track_id || null);
+  const [bgmVolume, setBgmVolume] = useState<number>(
+    clip.bgm_volume != null ? Math.round(clip.bgm_volume * 100) : 18
+  );
 
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
@@ -91,6 +106,22 @@ export const ExportModal: React.FC<Props> = ({
     clip.render_status === 'completed' && Boolean(clip.rendered_file_path)
   );
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingKit, setIsDownloadingKit] = useState(false);
+
+  const handleDownloadKit = async () => {
+    setIsDownloadingKit(true);
+    try {
+      await downloadExportKit(
+        clip.id,
+        `${clip.title ? clip.title.replace(/[^a-zA-Z0-9_-]/g, '_') : 'clip'}_export_kit.zip`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunduh publishing kit.';
+      setError(msg);
+    } finally {
+      setIsDownloadingKit(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -98,6 +129,9 @@ export const ExportModal: React.FC<Props> = ({
       setCropMode(normalizeCropMode(clip.crop_mode));
       setSubtitleStyle(normalizeSubtitleStyle(clip.subtitle_style));
       setAutoZoom(normalizeAutoZoom(clip.auto_zoom));
+      setIntroHookBanner(clip.intro_hook_banner !== false);
+      setBgmTrackId(clip.bgm_track_id || null);
+      setBgmVolume(clip.bgm_volume != null ? Math.round(clip.bgm_volume * 100) : 18);
       setIsCompleted(clip.render_status === 'completed' && Boolean(clip.rendered_file_path));
       setError(null);
     }
@@ -114,11 +148,35 @@ export const ExportModal: React.FC<Props> = ({
     setRenderStage('Menyiapkan klip dan konfigurasi filter...');
 
     try {
-      const res = await triggerRenderClip(clip.id, {
+      // Persist latest configuration to database prior to triggering render job
+      await updateClip(clip.id, {
         aspect_ratio: aspectRatio,
         crop_mode: cropMode,
         subtitle_style: subtitleStyle,
         auto_zoom: autoZoom,
+        intro_hook_banner: introHookBanner,
+        show_hook_banner: introHookBanner,
+        crop_x_pct: clip.crop_x_pct ?? 0.50,
+        remove_silence: clip.remove_silence ?? false,
+        auto_emoji: clip.auto_emoji ?? true,
+        bgm_track_id: bgmTrackId ?? undefined,
+        bgm_volume: Number((bgmVolume / 100).toFixed(2)),
+        soundboard_cues_json: clip.soundboard_cues_json,
+      });
+
+      const res = await triggerRenderClip(clip.id, {
+        aspect_ratio: aspectRatio,
+        crop_x_pct: clip.crop_x_pct ?? 0.50,
+        remove_silence: clip.remove_silence ?? false,
+        auto_emoji: clip.auto_emoji ?? true,
+        crop_mode: cropMode,
+        subtitle_style: subtitleStyle,
+        auto_zoom: autoZoom,
+        intro_hook_banner: introHookBanner,
+        show_hook_banner: introHookBanner,
+        bgm_track_id: bgmTrackId,
+        bgm_volume: Number((bgmVolume / 100).toFixed(2)),
+        soundboard_cues_json: clip.soundboard_cues_json,
       });
 
       // Subscribe to real-time SSE progress
@@ -358,31 +416,56 @@ export const ExportModal: React.FC<Props> = ({
               </div>
 
               {/* Download and Re-render actions */}
-              <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ flex: 1 }}
-                  onClick={() => setIsCompleted(false)}
-                >
-                  <RotateCcw size={14} />
-                  Render Ulang
-                </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
+                <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ flex: 1 }}
+                    onClick={() => setIsCompleted(false)}
+                  >
+                    <RotateCcw size={14} />
+                    Render Ulang
+                  </button>
+
+                  <button
+                    id="btn-download-rendered-mp4"
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ flex: 1.5 }}
+                    onClick={handleDownload}
+                    disabled={isDownloading}
+                  >
+                    {isDownloading ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {isDownloading ? 'Mengunduh...' : 'Unduh MP4'}
+                  </button>
+                </div>
 
                 <button
-                  id="btn-download-rendered-mp4"
+                  id="btn-download-export-kit-modal"
                   type="button"
                   className="btn btn-primary"
-                  style={{ flex: 2 }}
-                  onClick={handleDownload}
-                  disabled={isDownloading}
+                  style={{
+                    width: '100%',
+                    backgroundColor: '#10b981',
+                    border: 'none',
+                    color: '#ffffff',
+                    fontWeight: 600,
+                  }}
+                  onClick={handleDownloadKit}
+                  disabled={isDownloadingKit}
+                  title="Unduh Video MP4 + Cover JPG + Teks Copywriting TXT dalam 1 arsip .zip"
                 >
-                  {isDownloading ? (
+                  {isDownloadingKit ? (
                     <Loader2 size={14} className="spin" />
                   ) : (
-                    <Download size={14} />
+                    <Archive size={14} />
                   )}
-                  {isDownloading ? 'Mengunduh...' : 'Unduh Video MP4'}
+                  {isDownloadingKit ? 'Mengompresi Kit ZIP...' : 'Unduh Paket Lengkap 1-Click Kit (.zip)'}
                 </button>
               </div>
             </div>
@@ -394,12 +477,12 @@ export const ExportModal: React.FC<Props> = ({
                 <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 8 }}>
                   1. Rasio Aspek Video
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                   <button
                     type="button"
                     onClick={() => setAspectRatio('9:16')}
                     style={{
-                      padding: '12px 10px',
+                      padding: '12px 8px',
                       backgroundColor: aspectRatio === '9:16' ? 'var(--bg-surface-elevated)' : 'var(--bg-app)',
                       border: aspectRatio === '9:16' ? '1.5px solid var(--accent-neutral)' : '1px solid var(--border-subtle)',
                       borderRadius: 'var(--radius-sm)',
@@ -411,16 +494,16 @@ export const ExportModal: React.FC<Props> = ({
                       gap: 6,
                     }}
                   >
-                    <Smartphone size={20} color={aspectRatio === '9:16' ? 'var(--accent-neutral)' : 'var(--text-muted)'} />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>9:16 Vertikal</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Shorts / TikTok</span>
+                    <Smartphone size={18} color={aspectRatio === '9:16' ? 'var(--accent-neutral)' : 'var(--text-muted)'} />
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>9:16 Vertikal</span>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>Shorts / TikTok</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAspectRatio('1:1')}
                     style={{
-                      padding: '12px 10px',
+                      padding: '12px 8px',
                       backgroundColor: aspectRatio === '1:1' ? 'var(--bg-surface-elevated)' : 'var(--bg-app)',
                       border: aspectRatio === '1:1' ? '1.5px solid var(--accent-neutral)' : '1px solid var(--border-subtle)',
                       borderRadius: 'var(--radius-sm)',
@@ -432,16 +515,37 @@ export const ExportModal: React.FC<Props> = ({
                       gap: 6,
                     }}
                   >
-                    <Square size={20} color={aspectRatio === '1:1' ? 'var(--accent-neutral)' : 'var(--text-muted)'} />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>1:1 Persegi</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Instagram Feed</span>
+                    <Square size={18} color={aspectRatio === '1:1' ? 'var(--accent-neutral)' : 'var(--text-muted)'} />
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>1:1 Persegi</span>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>Feed Square</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAspectRatio('4:5')}
+                    style={{
+                      padding: '12px 8px',
+                      backgroundColor: aspectRatio === '4:5' ? 'var(--bg-surface-elevated)' : 'var(--bg-app)',
+                      border: aspectRatio === '4:5' ? '1.5px solid var(--accent-neutral)' : '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <RectangleVertical size={18} color={aspectRatio === '4:5' ? 'var(--accent-neutral)' : 'var(--text-muted)'} />
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>4:5 Portrait</span>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>IG Portrait</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAspectRatio('16:9')}
                     style={{
-                      padding: '12px 10px',
+                      padding: '12px 8px',
                       backgroundColor: aspectRatio === '16:9' ? 'var(--bg-surface-elevated)' : 'var(--bg-app)',
                       border: aspectRatio === '16:9' ? '1.5px solid var(--accent-neutral)' : '1px solid var(--border-subtle)',
                       borderRadius: 'var(--radius-sm)',
@@ -453,9 +557,9 @@ export const ExportModal: React.FC<Props> = ({
                       gap: 6,
                     }}
                   >
-                    <Monitor size={20} color={aspectRatio === '16:9' ? 'var(--accent-neutral)' : 'var(--text-muted)'} />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>16:9 Asli</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>YouTube Horizontal</span>
+                    <Monitor size={18} color={aspectRatio === '16:9' ? 'var(--accent-neutral)' : 'var(--text-muted)'} />
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>16:9 Asli</span>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>YT Landscape</span>
                   </button>
                 </div>
               </div>
@@ -490,6 +594,11 @@ export const ExportModal: React.FC<Props> = ({
                         id: 'speaker_track',
                         label: 'Speaker Track (AI Switch)',
                         desc: 'Fokus bergilir orang berbicara (podcast 2 orang)',
+                      },
+                      {
+                        id: 'streamer_split',
+                        label: 'Streamer Split (Facecam + Game)',
+                        desc: 'Facecam streamer di atas, layar game di bawah',
                       },
                     ].map((item) => {
                       const isSelected = cropMode === item.id;
@@ -646,8 +755,8 @@ export const ExportModal: React.FC<Props> = ({
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                   {[
                     { id: 'none', label: 'Tanpa Zoom', badge: '1.0x', desc: '1.0x Statis murni' },
-                    { id: 'subtle', label: 'Subtle Breathing', badge: '1.12x', desc: 'Siklus nafas halus' },
-                    { id: 'snap_hook', label: 'Snap Hook', badge: 'Hook 1.20x', desc: '1.20x punchy di 3 detik awal' },
+                    { id: 'snap_hook', label: 'Jump-Cut Pacing (FYP)', badge: '1.20x Cut', desc: 'Hard cut modular 1.20x tiap 5 detik' },
+                    { id: 'subtle', label: 'Subtle Pacing', badge: '1.12x Cut', desc: 'Jump-cut ritmik lebih halus' },
                   ].map((item) => {
                     const isSelected = autoZoom === item.id;
                     return (
@@ -693,6 +802,162 @@ export const ExportModal: React.FC<Props> = ({
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Option 5: Intro Hook Banner (Detik 0–3) */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 12px',
+                  backgroundColor: 'var(--bg-app)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    5. Tampilkan Hook Banner Awal (Detik 0–3)
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                    Kotak judul hook tebal di 3 detik pertama video untuk retensi FYP
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="modal-toggle-intro-hook-banner"
+                  onClick={() => setIntroHookBanner(!introHookBanner)}
+                  style={{
+                    width: 36,
+                    height: 20,
+                    borderRadius: 10,
+                    backgroundColor: introHookBanner ? '#facc15' : 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    padding: 2,
+                    transition: 'all 0.2s',
+                  }}
+                  title={introHookBanner ? 'Matikan Banner Hook Awal' : 'Aktifkan Banner Hook Awal'}
+                >
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      backgroundColor: introHookBanner ? '#000000' : 'var(--text-muted)',
+                      transform: introHookBanner ? 'translateX(16px)' : 'translateX(0)',
+                      transition: 'transform 0.2s',
+                    }}
+                  />
+                </button>
+              </div>
+
+              {/* Option 6: Background Music & Speech Auto-Ducking */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Music size={13} color="#a1a1aa" />
+                    6. Musik Latar & Speech Auto-Ducking
+                  </label>
+                  <span
+                    style={{
+                      fontSize: 9.5,
+                      padding: '1px 6px',
+                      borderRadius: 'var(--radius-pill)',
+                      backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                      color: '#60a5fa',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Sidechain FFmpeg
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                  {[
+                    { id: null, label: 'Tanpa Musik', desc: 'Hanya vokal asli' },
+                    { id: 'lofi_chill', label: 'Lo-Fi Chill', desc: 'Warm acoustic pad' },
+                    { id: 'comedy_quirky', label: 'Comedy Quirky', desc: 'Beat ritmis komedi' },
+                    { id: 'suspense_tension', label: 'Suspense Drone', desc: 'Dramatic tension' },
+                  ].map((track) => {
+                    const isSelected = bgmTrackId === track.id;
+                    return (
+                      <button
+                        key={track.id || 'none'}
+                        type="button"
+                        id={`modal-bgm-option-${track.id || 'none'}`}
+                        onClick={() => setBgmTrackId(track.id)}
+                        style={{
+                          padding: '8px 6px',
+                          backgroundColor: isSelected ? 'var(--bg-surface-elevated)' : 'var(--bg-app)',
+                          border: isSelected ? '1.5px solid var(--accent-neutral)' : '1px solid var(--border-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 2,
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          }}
+                        >
+                          {track.label}
+                        </span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.2 }}>
+                          {track.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {bgmTrackId && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: '8px 10px',
+                      backgroundColor: 'var(--bg-app)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Volume Musik Latar:</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{bgmVolume}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={5}
+                      max={40}
+                      step={1}
+                      value={bgmVolume}
+                      onChange={(e) => setBgmVolume(Number(e.target.value))}
+                      style={{
+                        width: '100%',
+                        accentColor: 'var(--accent-neutral)',
+                        cursor: 'pointer',
+                        height: 4,
+                      }}
+                    />
+                    <div style={{ fontSize: 9.5, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span>⚡</span>
+                      <span>Auto-Ducking: Musik otomatis surut (-20 dB) saat suara orang berbicara.</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* CTA Button */}
